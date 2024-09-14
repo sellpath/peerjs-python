@@ -2,7 +2,9 @@
 from abc import abstractmethod
 
 from aiortc import RTCPeerConnection
-from pyee import AsyncIOEventEmitter
+# from pyee import AsyncIOEventEmitter
+from pyee.asyncio import AsyncIOEventEmitter
+
 
 from .enums import ConnectionType
 from .servermessage import ServerMessage

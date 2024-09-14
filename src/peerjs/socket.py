@@ -4,10 +4,12 @@ import json
 import logging
 
 import websockets
-from pyee import AsyncIOEventEmitter
+# from pyee import AsyncIOEventEmitter
+from pyee.asyncio import AsyncIOEventEmitter
+
 from websockets.exceptions import ConnectionClosedError
 
-from .enums import SocketEventType
+from .enums import SocketEventType, ServerMessageType
 from .servermessage import ServerMessage
 
 log = logging.getLogger(__name__)
@@ -26,7 +28,7 @@ class Socket(AsyncIOEventEmitter):
         port: int = None,
         path: str = None,
         key: str = None,
-        pingInterval: int = 5000
+        pingInterval: int = 5
     ) -> None:
         """Create new wrapper around websocket."""
         super().__init__()
@@ -37,6 +39,11 @@ class Socket(AsyncIOEventEmitter):
         self._messagesQueue: list = []
         self._websocket: websockets.client.WebSocketClientProtocol = None
         self._receiver: asyncio.Task = None
+
+        self._heartbeat_task: asyncio.Task = None
+        self.ping_interval = pingInterval 
+        self._wsPingTimer = None
+        self.websocket_open = False  # Assuming you have a flag to check if the websocket is open
 
     async def _connect(self, wss_url=None):
         """Connect to WebSockets server."""
@@ -81,16 +88,26 @@ class Socket(AsyncIOEventEmitter):
 
     async def start(self, id: str, token: str) -> None:
         """Start socket connection."""
+
+        log.warning("Websocket start()")
         self._id = id
         _ws_url = f"{self._baseUrl}&id={id}&token={token}"
         if (self._websocket or not self._disconnected):
             # socket already connected
             return
+        
+        log.warning("Websocket _connect()")
         self._websocket = await self._connect(wss_url=_ws_url)
         # ask asyncio to schedule a receiver soon
         # it will end when the socket closes
         self._receiver = asyncio.create_task(
             self._receive())
+        
+        log.warning("Websocket task self._receive()")
+        self._heartbeat_task = asyncio.create_task(
+            self._heartbeats())
+        log.warning("Websocket task _heartbeats")
+        
 
     # Is the websocket currently open?
     def _wsOpen(self) -> bool:
@@ -105,14 +122,48 @@ class Socket(AsyncIOEventEmitter):
         self._messagesQueue = []
         for message in copiedQueue:
             self.send(message)
+    async def _heartbeats(self) -> None:
+        """Keep sending heartbeats over the websocket."""
+        log.warning(f"Websocket task _heartbeats start:  self._disconnected: { self._disconnected}")
+        heartbest_message = json.dumps({"type": "HEARTBEAT"})
+
+        while self._wsOpen():  # Keep running as long as the _wsOpen is open
+            log.warning(f"Websocket task _heartbeats _sendHeartbeat: {self.ping_interval} {heartbest_message}")
+            await self._websocket.send(heartbest_message)
+            await asyncio.sleep(self.ping_interval)  # Wait for ping interval before next heartbeat
+
+        if not self._wsOpen():
+            log.warning("Cannot send _heartbeats, because _wsOpen closed")
+
+    # async def _heartbeats_task(self) -> None:
+    #     """Keep sending heartbeats over the websocket."""
+    #     log.warning(f"Websocket task _heartbeats_task start:  self._disconnected: { self._disconnected}")
+    #     heartbest_message = json.dumps({"type": "HEARTBEAT"})
+
+    #     while not self._disconnected:  # Keep running as long as the socket is open
+    #         log.warning(f"Websocket task _heartbeats_task _sendHeartbeat: {self.ping_interval} {heartbest_message}")
+    #         await self._websocket.send(heartbest_message)
+    #         # await self._sendHeartbeat()  # Send a heartbeat message
+    #         await asyncio.sleep(self.ping_interval)  # Wait for ping interval before next heartbeat
+        
+    #     if self._disconnected:
+    #         log.warning("Cannot send heartbeat, because socket closed")
+
+    # async def _sendHeartbeat(self) -> None:
+    #     """Send a heartbeat message over the websocket."""
+    #     # Assuming you have a method to convert data to JSON string
+    #     message = json.dumps({"type": ServerMessageType.Heartbeat})
+    #     await self._websocket.send(message)
+    #     log.warning(f"Websocket task _heartbeats_task _sendHeartbeat sent: {message}")
 
     async def send(self, data: any) -> None:
         """Expose send for DC & Peer."""
         # If the socket was already closed, nothing to do
         if self._disconnected:
+            log.warning("skip send, socket closed")
             return
 
-        log.debug('Socket sending data: \n%r', data)
+        log.warning('Socket sending data: \n%r', data)
 
         # If we didn't get an ID yet,
         # we can't yet send anything so we should queue
@@ -128,7 +179,7 @@ class Socket(AsyncIOEventEmitter):
                         data)
             return
         message = json.dumps(data)
-        log.debug('Message sent to signaling server: \n %r', message)
+        log.warning('Message sent to signaling server: \n %r', message)
         await self._websocket.send(message)
 
     async def close(self) -> None:
@@ -140,6 +191,8 @@ class Socket(AsyncIOEventEmitter):
             self.emit(SocketEventType.Disconnected)
 
     async def _cleanup(self) -> None:
+        if self._heartbeat_task:
+            self._heartbeat_task.cancel()
         if self._receiver:
             self._receiver.cancel()
         if self._websocket:

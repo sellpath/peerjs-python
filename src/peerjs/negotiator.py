@@ -4,7 +4,9 @@ import logging
 # from .dataconnection import DataConnection
 from aiortc import RTCIceCandidate, RTCPeerConnection, RTCSessionDescription
 from aiortc.sdp import candidate_from_sdp, candidate_to_sdp
-from pyee import AsyncIOEventEmitter
+# from pyee import AsyncIOEventEmitter
+from pyee.asyncio import AsyncIOEventEmitter
+
 # import { MediaConnection } from "./mediaconnection";
 from .enums import ConnectionEventType, ConnectionType, PeerErrorType, ServerMessageType
 from .util import util

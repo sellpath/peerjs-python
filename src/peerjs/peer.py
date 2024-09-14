@@ -8,7 +8,9 @@ from dataclasses import dataclass, field
 from typing import Any, List
 import traceback
 
-from pyee import AsyncIOEventEmitter
+# from pyee import AsyncIOEventEmitter
+from pyee.asyncio import AsyncIOEventEmitter
+
 
 from .api import API
 from .baseconnection import BaseConnection
